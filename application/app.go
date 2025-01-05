@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -28,6 +29,13 @@ func (a *App) Start(ctx context.Context) error {
 		Handler: a.router,
 	}
 	err := a.rdb.Ping(ctx).Err()
+
+	defer func() {
+		if err := a.rdb.Close(); err != nil {
+			fmt.Println("Faild to close redis", err)
+		}
+	}()
+
 	if err != nil {
 		return fmt.Errorf("faild to connect to redis: %w", err)
 	}
@@ -38,13 +46,22 @@ func (a *App) Start(ctx context.Context) error {
 	go func() {
 		err = server.ListenAndServe()
 		if err != nil {
-			ch <- fmt.Errorf("faild to start %w", err)
+			ch <- fmt.Errorf("faild to start server %w", err)
 		}
 		close(ch)
 	}()
 
+	select {
+	case err = <-ch:
+		return err
+	case <-ctx.Done():
+		timeout, cancal := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancal()
+		return server.Shutdown(timeout)
+	}
+
+	// ctx.Done()
 	// err, open := <- ch
 
-	
 	return nil
 }
